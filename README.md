@@ -1,16 +1,47 @@
-# hayya_ala_khairil_amal
+# Hayya 'Ala Khairil 'Amal (حي على خير العمل)
 
-A new Flutter project.
+A beautiful, high-performance Azan and prayer scheduling application built using Flutter, Kotlin, and Dart. Designed for cross-platform efficiency with clean architecture, home screen widget integrations, and robust background data triggers.
 
-## Getting Started
+## 🌙 Features
 
-This project is a starting point for a Flutter application.
+- **Accurate Prayer Times:** Location-based calculations for high precision.
+- **Azan Notifications:** Beautiful audio notifications and background execution for prayer alerts.
+- **Home Screen Widgets:** Quick-glance prayer tracking directly from your mobile home screen.
+- **Modern UI/UX:** Fast, intuitive, and responsive design built with Flutter.
 
-A few resources to get you started if this is your first Flutter project:
+## 🚀 Tech Stack
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+- **Frontend:** Dart & Flutter (Cross-platform)
+- **Native Integrations:** Kotlin (Android background services & widget configuration)
+- **Local Storage:** SQLite / Hive for offline capability
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 🛠️ Getting Started
+
+### Prerequisites
+
+Ensure you have the following installed locally:
+- [Flutter SDK](https://docs.flutter.dev/get-started/install)
+- [Android Studio](https://developer.android.com/studio) / Xcode (for iOS testing)
+- Java Development Kit (JDK)
+
+### Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/zainally/hayya_ala_khairil_amal.git
+   cd hayya_ala_khairil_amal
+   ```
+
+2. **Fetch dependencies:**
+   ```bash
+   flutter pub get
+   ```
+
+3. **Run the application:**
+   ```bash
+   flutter run
+   ```
+
+## 📜 License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
