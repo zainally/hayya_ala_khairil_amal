@@ -504,7 +504,7 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'Version 2.0.2', // Upgraded version tracker configuration
+                                'Version 2.0.3', // Upgraded version tracker configuration
                                 textAlign: TextAlign.center,
                                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.tealAccent.withOpacity(0.5), letterSpacing: 1.0),
                               ),

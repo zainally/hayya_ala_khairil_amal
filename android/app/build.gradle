@@ -41,7 +41,7 @@ android {
     defaultConfig {
         applicationId = "com.hayya.hayya_ala_khairil_amal"
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        targetSdk = 34 //to fix Android 14 problems
         
         // Dynamically resolved from pubspec.yaml via local.properties
         versionCode = flutterVersionCode.toInteger()
