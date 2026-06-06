@@ -7,5 +7,7 @@
     android:updatePeriodMillis="0"
     android:initialLayout="@layout/prayer_widget"
     android:resizeMode="horizontal|vertical"
-    android:widgetCategory="home_screen">
+    android:widgetCategory="home_screen"
+	android:previewLayout="@layout/prayer_widget"
+	android:previewImage="@drawable/widget_preview_snapshot">
 </appwidget-provider>

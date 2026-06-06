@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart' hide TextDirection; 
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:audio_session/audio_session.dart';
 import 'package:android_alarm_manager_plus/android_alarm_manager_plus.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'location_service.dart';
@@ -16,6 +17,19 @@ void main() async {
   await AlarmManagerService.initializeEngine();
   await AlarmManagerService.primeAudioCache();
   runApp(const HayyaAlaKhairilAmalApp());
+}
+
+// 🌟 GLOBAL HELPER METHOD: Safely stops background and preview audio streams
+Future<void> globallyStopAzanPlayback(AudioPlayer? activeUiTestPlayer) async {
+  final SharedPreferences prefs = await SharedPreferences.getInstance();
+  
+  // 1. Tell the background isolate executor loop to terminate immediately
+  await prefs.setBool('is_azan_playing_now', false);
+  
+  // 2. Kill the foreground test player instance if it is active
+  if (activeUiTestPlayer != null && activeUiTestPlayer.playing) {
+    await activeUiTestPlayer.stop();
+  }
 }
 
 class HayyaAlaKhairilAmalApp extends StatelessWidget {
@@ -53,6 +67,9 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
   double? _lng;
 
   Timer? _countdownTimer;
+  Timer? _livePlaybackChecker; // 🌟 Polling loop for active stop-button checks
+  final ValueNotifier<bool> _isAzanCurrentlySounding = ValueNotifier<bool>(false);
+
   String _nextPrayerKey = "imsak";
   String _countdownText = "00:00:00";
   int _calculatedDay = DateTime.now().day;
@@ -94,12 +111,26 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
   void initState() {
     super.initState();
     _loadPreferencesAndTimes();
+    _startLivePlaybackListener();
   }
 
   @override
   void dispose() {
     _countdownTimer?.cancel();
+    _livePlaybackChecker?.cancel();
+    _isAzanCurrentlySounding.dispose();
     super.dispose();
+  }
+
+  // 🌟 Real-time disk listener loop for state synchronizations
+  void _startLivePlaybackListener() {
+    _livePlaybackChecker = Timer.periodic(const Duration(seconds: 1), (timer) async {
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      final bool currentStatus = prefs.getBool('is_azan_playing_now') ?? false;
+      if (_isAzanCurrentlySounding.value != currentStatus) {
+        _isAzanCurrentlySounding.value = currentStatus;
+      }
+    });
   }
 
   Future<void> _loadPreferencesAndTimes() async {
@@ -424,7 +455,36 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
                             ),
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
+
+                        // 🌟 DYNAMIC STOP CONSOLE PANEL BLOCK: Evaluates disk state and drops panic switch if active
+                        ValueListenableBuilder<bool>(
+                          valueListenable: _isAzanCurrentlySounding,
+                          builder: (context, isSounding, child) {
+                            if (!isSounding) return const SizedBox.shrink();
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2.0),
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red.shade900.withOpacity(0.85),
+                                  foregroundColor: Colors.white,
+                                  side: const BorderSide(color: Colors.redAccent, width: 1.0),
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                ),
+                                icon: const Icon(Icons.stop_circle, color: Colors.white, size: 22),
+                                label: const Text(
+                                  'إيقاف الأذان (Stop Azan Playback)', 
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 0.3)
+                                ),
+                                onPressed: () async {
+                                  await globallyStopAzanPlayback(null);
+                                },
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 2),
                         
                         Expanded(
                           child: ListView(
@@ -504,7 +564,7 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'Version 2.0.3', // Upgraded version tracker configuration
+                                'Version 2.0.4', // 🌟 BUMPED INCREMENT COMPLIANCE METADATA TARGET
                                 textAlign: TextAlign.center,
                                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.tealAccent.withOpacity(0.5), letterSpacing: 1.0),
                               ),
@@ -1043,12 +1103,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  // 🌟 SIMULATED ALARM AUDIO PREVIEW: Forces hardware routing over physical alarm channels
   Future<void> _toggleAzanTest() async {
     if (_isTestingAudio) {
-      await _testPlayer?.stop();
+      await globallyStopAzanPlayback(_testPlayer);
       setState(() => _isTestingAudio = false);
     } else {
       setState(() => _isTestingAudio = true);
+      
+      final SharedPreferences prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('is_azan_playing_now', true);
+
       String assetPath;
       switch (_selectedVoice) {
         case 'ghalwash': assetPath = 'assets/audio/adhan_ghalwash.mp3'; break;
@@ -1061,14 +1126,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
 
       try {
+        // Enforce physical alarm stream routing parameters onto the preview player memory map
+        await _testPlayer?.setAndroidAudioAttributes(const AndroidAudioAttributes(
+          usage: AndroidAudioUsage.alarm, // Directs engine output straight into STREAM_ALARM
+          contentType: AndroidAudioContentType.music,
+        ));
+
+        // Enforce active priority linkage overrides directly onto the native device thread session
+        final session = await AudioSession.instance;
+        await session.configure(const AudioSessionConfiguration(
+          androidAudioAttributes: AndroidAudioAttributes(
+            usage: AndroidAudioUsage.alarm,
+            contentType: AndroidAudioContentType.music,
+          ),
+        ));
+        await session.setActive(true); // Commits structural stream linkage updates to drop silent/vibrate switches
+
         await _testPlayer?.setAudioSource(AudioSource.asset(assetPath));
         _testPlayer?.play();
-        _testPlayer?.playerStateStream.listen((state) {
+        _testPlayer?.playerStateStream.listen((state) async {
           if (state.processingState == ProcessingState.completed && mounted && _isTestingAudio) {
+            await prefs.setBool('is_azan_playing_now', false);
             setState(() => _isTestingAudio = false);
           }
         });
       } catch (e) {
+        print("!!! Native Audio Testing Instantiation Fault: $e");
+        await prefs.setBool('is_azan_playing_now', false);
         setState(() => _isTestingAudio = false);
       }
     }

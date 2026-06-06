@@ -159,12 +159,31 @@ void hayyaBackgroundAzanExecutor(int id) async {
       final Directory docDir = await getApplicationDocumentsDirectory();
       final File localPlaybackFile = File('${docDir.path}/$fileName');
       
+
+
       if (await localPlaybackFile.exists()) {
         await player.setAudioSource(AudioSource.file(localPlaybackFile.path));
+        
+        // 🌟 RESET THE STOP FLAG BEFORE PLAYING
+        await prefs.setBool('is_azan_playing_now', true);
         await player.play();
         
-        await Future.delayed(const Duration(minutes: 5));
+        // 🌟 REPLACED Future.delayed: Loop and check for the stop signal every second
+        for (int i = 0; i < 300; i++) { // 300 seconds = 5 minutes maximum
+          await Future.delayed(const Duration(seconds: 1));
+          
+          // Re-fetch preferences to check if user tapped the stop button on the UI
+          final SharedPreferences freshPrefs = await SharedPreferences.getInstance();
+          bool isStillPlaying = freshPrefs.getBool('is_azan_playing_now') ?? true;
+          
+          if (!isStillPlaying) {
+            print(">>> Azan interrupted via system stop trigger signal.");
+            break; 
+          }
+        }
+        
         await player.stop();
+        await prefs.setBool('is_azan_playing_now', false); // Clean up state flag
       }
       await player.dispose();
     } catch (error, stackTrace) {
