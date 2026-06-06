@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:isolate'; // 🌟 Required for ReceivePort
+import 'dart:ui';      // 🌟 Required for IsolateNameServer
 import 'package:flutter/widgets.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,13 +11,13 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'hijri_calendar_helper.dart';
 import 'widget_service.dart';
+import 'audio_state_manager.dart';
 
 class AlarmManagerService {
   static Future<void> initializeEngine() async {
     await AndroidAlarmManager.initialize();
   }
 
-  // Extracts all track assets to native permanent storage (Executed in Foreground Main)
   static Future<void> primeAudioCache() async {
     final List<String> audioTracks = [
       'assets/audio/adhan_zadeh.mp3',
@@ -68,7 +70,7 @@ void hayyaBackgroundAzanExecutor(int id) async {
     await WidgetService.refreshWidgetData(); 
   } catch (_) {}
 
-  // 2. TEXT NOTIFICATION ENGINE: Fires a system banner for every single prayer time
+  // 2. TEXT NOTIFICATION ENGINE
   try {
     final FlutterLocalNotificationsPlugin localNotif = FlutterLocalNotificationsPlugin();
     const AndroidInitializationSettings initSettingsAndroid = AndroidInitializationSettings('@mipmap/launcher_icon');
@@ -122,20 +124,32 @@ void hayyaBackgroundAzanExecutor(int id) async {
 
   // 3. AUDIO PLAYER MODULE: Restricted strictly to Fajr (ID: 1001)
   if (id == 1001) {
-    final AudioPlayer player = AudioPlayer();
+    final player = AudioStateManager.globalPlayer;
+    final ReceivePort backgroundCommandPort = ReceivePort(); // 🌟 Port to receive UI events
+    
     try {
+      // 🌟 Open communication port pipeline inside background memory space
+      IsolateNameServer.removePortNameMapping('azan_commands_port');
+      IsolateNameServer.registerPortWithName(backgroundCommandPort.sendPort, 'azan_commands_port');
+
+      // 🌟 Listen continuously for the UI to tell us to shut down
+      backgroundCommandPort.listen((message) async {
+        if (message == 'STOP') {
+          print(">>> Background audio thread explicitly interrupted via reverse port message.");
+          try {
+            await player.stop();
+          } catch (_) {}
+        }
+      });
+
       final SharedPreferences prefs = await SharedPreferences.getInstance();
       final String selectedVoice = prefs.getString('selected_azan_voice') ?? 'zadeh';
 
-      // CORRECTIONS APPLIED BELOW
-
-      // FIX 1: Enforce physical stream utilization attributes onto the audio player instance
       await player.setAndroidAudioAttributes(const AndroidAudioAttributes(
-        usage: AndroidAudioUsage.alarm, // Forces routing onto native hardware STREAM_ALARM
+        usage: AndroidAudioUsage.alarm, 
         contentType: AndroidAudioContentType.music,
       ));
 
-      // FIX 2: Enforce audio session registration parameters and trigger activation loop
       final session = await AudioSession.instance;
       await session.configure(const AudioSessionConfiguration(
         androidAudioAttributes: AndroidAudioAttributes(
@@ -143,7 +157,7 @@ void hayyaBackgroundAzanExecutor(int id) async {
           contentType: AndroidAudioContentType.music,
         ),
       ));
-      await session.setActive(true); // Commits hardware channel priority mapping changes directly to the OS
+      await session.setActive(true);
 
       String fileName;
       switch (selectedVoice) {
@@ -159,37 +173,22 @@ void hayyaBackgroundAzanExecutor(int id) async {
       final Directory docDir = await getApplicationDocumentsDirectory();
       final File localPlaybackFile = File('${docDir.path}/$fileName');
       
-
-
       if (await localPlaybackFile.exists()) {
         await player.setAudioSource(AudioSource.file(localPlaybackFile.path));
         
-        // 🌟 RESET THE STOP FLAG BEFORE PLAYING
-        await prefs.setBool('is_azan_playing_now', true);
+        // Broadcast layout display updates straight up to your home screen
+        AudioStateManager.notifyDashboard(true);
+        
+        // 🌟 Execution holds right here until completion or until player.stop() is called via the port
         await player.play();
-        
-        // 🌟 REPLACED Future.delayed: Loop and check for the stop signal every second
-        for (int i = 0; i < 300; i++) { // 300 seconds = 5 minutes maximum
-          await Future.delayed(const Duration(seconds: 1));
-          
-          // Re-fetch preferences to check if user tapped the stop button on the UI
-          final SharedPreferences freshPrefs = await SharedPreferences.getInstance();
-          bool isStillPlaying = freshPrefs.getBool('is_azan_playing_now') ?? true;
-          
-          if (!isStillPlaying) {
-            print(">>> Azan interrupted via system stop trigger signal.");
-            break; 
-          }
-        }
-        
-        await player.stop();
-        await prefs.setBool('is_azan_playing_now', false); // Clean up state flag
       }
-      await player.dispose();
-    } catch (error, stackTrace) {
+    } catch (error) {
       print("!!! BACKGROUND ISOLATE AUDIO EXCEPTION: $error");
-      print(stackTrace);
-      player.dispose();
+    } finally {
+      // 🌟 Clean up ports and notify dashboard when playback ends naturally or is cut off
+      backgroundCommandPort.close();
+      IsolateNameServer.removePortNameMapping('azan_commands_port');
+      AudioStateManager.notifyDashboard(false);
     }
   }
 }
