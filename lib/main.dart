@@ -272,7 +272,12 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> with Widg
       });
 
       _startCountdownEngine();
-      await WidgetService.refreshWidgetData(); 
+      // 🌟 FIXED: Pass the computed parameters directly to the Widget Service securely
+      await WidgetService.refreshWidgetData(
+        preCalculatedTimes: structuredChronologicalTimes,
+        preCalculatedHijriDate: calendarData['formatted']!,
+        preCalculatedShiaEvent: calendarData['event']!,
+      ); 
     }
   }
 
