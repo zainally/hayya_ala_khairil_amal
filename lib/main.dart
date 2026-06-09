@@ -13,7 +13,7 @@ import 'prayer_time_service.dart';
 import 'alarm_manager_service.dart';
 import 'hijri_calendar_helper.dart';
 import 'widget_service.dart';
-import 'audio_state_manager.dart'; // 🌟 Import your new central audio manager
+import 'audio_state_manager.dart'; // Centralized static audio manager cockpit
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -22,7 +22,7 @@ void main() async {
   runApp(const HayyaAlaKhairilAmalApp());
 }
 
-// 🌟 GLOBAL HELPER METHOD: Safely terminates any application-wide audio streams
+// GLOBAL HELPER METHOD: Safely terminates any application-wide audio streams
 Future<void> globallyStopAzanPlayback(AudioPlayer? activeUiTestPlayer) async {
   await AudioStateManager.stopEverything();
 }
@@ -52,8 +52,10 @@ class PrayerDashboardScreen extends StatefulWidget {
   State<PrayerDashboardScreen> createState() => _PrayerDashboardScreenState();
 }
 
-class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
+// 🌟 FIXED: Added WidgetsBindingObserver mixin to seamlessly track background-to-foreground wake-ups
+class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> with WidgetsBindingObserver {
   bool _isLoading = true;
+  bool _isLocationRefreshing = false; // Track inline GPS loading spin-wheels
   bool _isFajrAlarm = true; 
   int _hijriOffset = 0; 
   String _cityName = "جاري تحديد الموقع..."; 
@@ -105,32 +107,38 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
   @override
   void initState() {
     super.initState();
+    // 🌟 FIXED: Register app state lifecycle listener to detect traveler relocations automatically
+    WidgetsBinding.instance.addObserver(this); 
     _loadPreferencesAndTimes();
     
-    // 🌟 Bind the cross-isolate pipeline channel
+    // Bind the cross-isolate pipeline channel
     IsolateNameServer.removePortNameMapping('azan_playback_port');
     IsolateNameServer.registerPortWithName(_port.sendPort, 'azan_playback_port');
 
-    _port.listen((message) async {
+    _port.listen((message) {
       if (message is bool) {
         _isAzanPlayingNow.value = message;
       }
-      //🌟 New fix: If a force stop command comes through the port channel, murder the local track instantly
-      else if (message == 'FORCE_TRIGGER_STOP') {
-        if (AudioStateManager.globalPlayer.playing) {
-            await AudioStateManager.globalPlayer.stop();
-        }
-        _isAzanPlayingNow.value = false;
-      }	  
     });
   }
 
   @override
   void dispose() {
+    // 🌟 FIXED: Unregister app state lifecycle listener cleanly
+    WidgetsBinding.instance.removeObserver(this); 
     _countdownTimer?.cancel();
     _isAzanPlayingNow.dispose();
     IsolateNameServer.removePortNameMapping('azan_playback_port');
     super.dispose();
+  }
+
+  // 🌟 FIXED: Automatic Location Recalculation loop whenever the application wakes up
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      print(">>> App brought to foreground. Executing auto location & time recalculation synchronization map.");
+      _loadAndCalculateTimes();
+    }
   }
 
   Future<void> _loadPreferencesAndTimes() async {
@@ -220,19 +228,35 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
     };
 
     final now = DateTime.now();
-    for (var entry in structuredChronologicalTimes.entries) {
-      final prayerName = entry.key;
-      final prayerTime = entry.value;
+    
+    // 🌟 FIXED: Rolling 24-hour scheduling cushion matrix to guarantee tomorrow morning's alarms are pre-buffered
+    final tomorrow = today.add(const Duration(days: 1));
+    final Map<String, DateTime> tomorrowTimes = Map<String, DateTime>.from(
+      PrayerTimeService.calculateJafariTimes(
+        latitude: targetLat,
+        longitude: targetLng,
+        date: tomorrow,
+      )
+    );
 
-      if (prayerName == 'sunrise' || prayerName == 'midnight' || prayerName == 'imsak') continue;
-      if (prayerName == 'fajr' && !_isFajrAlarm) continue; 
+    for (var prayerName in prayerAlarmIds.keys) {
+      if (prayerName == 'fajr' && !_isFajrAlarm) continue;
 
-      if (prayerTime.isAfter(now)) {
-        await AlarmManagerService.scheduleAzanAlarm(
-          alarmId: prayerAlarmIds[prayerName]!,
-          targetTime: prayerTime,
-        );
+      DateTime? todayTime = calculatedTimes[prayerName];
+      DateTime targetTriggerTime;
+
+      if (todayTime != null && todayTime.isAfter(now)) {
+        // Today's prayer time is still ahead in the future
+        targetTriggerTime = todayTime;
+      } else {
+        // Today's prayer time has passed; look ahead and book tomorrow's slot immediately
+        targetTriggerTime = tomorrowTimes[prayerName]!;
       }
+
+      await AlarmManagerService.scheduleAzanAlarm(
+        alarmId: prayerAlarmIds[prayerName]!,
+        targetTime: targetTriggerTime,
+      );
     }
 
     if (mounted) {
@@ -369,20 +393,45 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
                           color: Colors.black.withOpacity(0.4),
                           shape: RoundedRectangleBorder(side: const BorderSide(color: Colors.white10, width: 0.5), borderRadius: BorderRadius.circular(8)),
                           child: Padding(
-                            padding: const EdgeInsets.all(10.0),
+                            padding: const EdgeInsets.symmetric(horizontal: 14.0, vertical: 10.0),
                             child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(Icons.location_on, color: Colors.tealAccent, size: 18),
-                                const SizedBox(width: 8),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.center,
-                                  children: [
-                                    Text(_cityName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                                    const SizedBox(height: 2),
-                                    Text('Lat: ${_lat?.toStringAsFixed(4)} | Lng: ${_lng?.toStringAsFixed(4)}', style: const TextStyle(color: Colors.white60, fontSize: 10)),
-                                  ],
+                                const Icon(Icons.location_on, color: Colors.tealAccent, size: 20),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(_cityName, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                                      const SizedBox(height: 2),
+                                      Text('Lat: ${_lat?.toStringAsFixed(4)} | Lng: ${_lng?.toStringAsFixed(4)}', style: const TextStyle(color: Colors.white60, fontSize: 11)),
+                                    ],
+                                  ),
                                 ),
+                                _isLocationRefreshing
+                                    ? const SizedBox(
+                                        width: 22,
+                                        height: 22,
+                                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.tealAccent),
+                                      )
+                                    : IconButton(
+                                        icon: const Icon(Icons.refresh, color: Colors.tealAccent, size: 22),
+                                        tooltip: "Refresh Location Coordinates",
+                                        onPressed: () async {
+                                          setState(() => _isLocationRefreshing = true);
+                                          await _loadAndCalculateTimes();
+                                          setState(() => _isLocationRefreshing = false);
+                                          if (mounted) {
+                                            ScaffoldMessenger.of(context).showSnackBar(
+                                              const SnackBar(
+                                                content: Text('الموقع محدث (Location Updated Successfully)'),
+                                                backgroundColor: Colors.teal,
+                                                duration: Duration(seconds: 2),
+                                              ),
+                                            );
+                                          }
+                                        },
+                                      ),
                               ],
                             ),
                           ),
@@ -457,7 +506,6 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
                         ),
                         const SizedBox(height: 4),
 
-                        // 🌟 INSERTED PERFECTLY HERE: ValueListenableBuilder cross-isolate port panel block
                         ValueListenableBuilder<bool>(
                           valueListenable: _isAzanPlayingNow,
                           builder: (context, isPlaying, child) {
@@ -477,7 +525,7 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
                                 label: const Text('إيقاف الأذان (Stop Azan Playback)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                                 onPressed: () async {
                                   await AudioStateManager.stopEverything(); 
-                                  _isAzanPlayingNow.value = false; // Hide instantly on tap
+                                  _isAzanPlayingNow.value = false; 
                                 },
                               ),
                             );
@@ -563,7 +611,7 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'Version 2.0.4', 
+                                'Version 2.0.5', // 🌟 FIXED: Bumped version tag to 2.0.5
                                 textAlign: TextAlign.center,
                                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.tealAccent.withOpacity(0.5), letterSpacing: 1.0),
                               ),
@@ -687,7 +735,6 @@ class TaqeebatScreen extends StatelessWidget {
           color: const Color(0xFF121212),
           child: TabBarView(
             children: [
-              // 1. FAJR TAQEEBAT
               _buildScrollablePrayerText([
                 _buildDuaCard(
                   titleEnglish: "Post-Fajr Supplication",
@@ -720,8 +767,6 @@ class TaqeebatScreen extends StatelessWidget {
                       "and perpetual thankfulness for You as long as you keep me alive.",
                 ),
               ]),
-
-              // 2. DHUHR TAQEEBAT
               _buildScrollablePrayerText([
                 _buildDuaCard(
                   titleEnglish: "Post-Dhuhr Protection Supplication",
@@ -739,7 +784,7 @@ class TaqeebatScreen extends StatelessWidget {
                       "وَلاَ رِزْقاً إِلاَّ بَسَطْتَهُ\n"
                       "وَلاَ خَوْفاً إِلاَّ آمَنْتَهُ\n"
                       "وَلاَ سُوءاً إِلاَّ صَرَفْتَهُ\n"
-                      "وَلاَ حَاجَةَ هِيَ لَكَ رِضاً وَلِيَ فيهَا صَلاَحٌ إِلاَّ قَضَيْتَهَا\n"
+                      "وَلاَ حَاجَةً هِيَ لَكَ رِضاً وَلِيَ فيهَا صَلاَحٌ إِلاَّ قَضَيْتَهَا\n"
                       "يَا أَرْحَمَ ٱلرَّاحِمينَ\n"
                       "آمينَ رَبَّ ٱلْعَالَمينَ",
                   transliterationText: "la ilaha illa allahu al`azimu alhalimu\n"
@@ -778,8 +823,6 @@ class TaqeebatScreen extends StatelessWidget {
                       "(please) Respond, O Lord of the worlds.",
                 ),
               ]),
-
-              // 3. ASR TAQEEBAT
               _buildScrollablePrayerText([
                 _buildDuaCard(
                   titleEnglish: "Post-Asr Submission Supplication",
@@ -815,8 +858,6 @@ class TaqeebatScreen extends StatelessWidget {
                       "and not controlling death nor life nor raising (the dead) to life.",
                 ),
               ]),
-
-              // 4. MAGHRIB TAQEEBAT
               _buildScrollablePrayerText([
                 _buildDuaCard(
                   titleEnglish: "Post-Maghrib Supplication",
@@ -846,8 +887,6 @@ class TaqeebatScreen extends StatelessWidget {
                       "I pray Your forgiveness and I repent before You.",
                 ),
               ]),
-
-              // 5. ISHA TAQEEBAT
               _buildScrollablePrayerText([
                 _buildDuaCard(
                   titleEnglish: "Sustenance Expansion Supplication (Rizq)",
@@ -867,7 +906,7 @@ class TaqeebatScreen extends StatelessWidget {
                       "وَٱجْعَلْ يَا رَبِّ رِزْقَكَ لِي وَاسِعاً\n"
                       "وَمَطْلَبَهُ سَهْلاً\n"
                       "وَمَأْخَذَهُ قَرِيباً\n"
-                      "وَلاَ تُعَنِّني بِطَلَبِ مَا لَمْ تُقَدِّرْ لِي فِيهِ رِزْقاً\n"
+                      "وَلاَ تُعَنِّني بِطَلَبِ مَا لَمْ تُقَدِّر| لِي فِيهِ رِزْقاً\n"
                       "فَإِنَّكَ غَنِيٌّ عَنْ عَذَابِي\n"
                       "وَأَنَا فَقِيرٌ إِلَىٰ رَحْمَتِكَ\n"
                       "فَصَلِّ عَلَىٰ مُحَمَّدٍ وَآلِهِ\n"
@@ -1002,7 +1041,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     'new_york': {'name': 'New York (نيويورك)', 'lat': 40.7128, 'lng': -74.0060},
     'niamey': {'name': 'Niamey (نيامي)', 'lat': 13.5116, 'lng': 2.1254},
     'nouakchott': {'name': 'Nouakchott (نواكشوط)', 'lat': 18.0835, 'lng': -15.9785},
-    'ouagadougou': {'name': 'Ouagadوغو)', 'lat': 12.3714, 'lng': -1.5197},
+    'ouagadougou': {'name': 'Ouagadougou (واغادوغو)', 'lat': 12.3714, 'lng': -1.5197},
     'phoenix': {'name': 'Phoenix (فينيكس)', 'lat': 33.4484, 'lng': -112.0740},
     'rabat': {'name': 'Rabat (الرباط)', 'lat': 34.0209, 'lng': -6.8416},
     'riyadh': {'name': 'Riyadh (الرياض)', 'lat': 24.7136, 'lng': 46.6753},

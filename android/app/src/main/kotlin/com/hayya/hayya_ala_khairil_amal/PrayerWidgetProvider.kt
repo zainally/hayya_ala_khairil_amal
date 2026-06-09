@@ -19,6 +19,10 @@ class PrayerWidgetProvider : AppWidgetProvider() {
                 // Render the active Hijri date string
                 views.setTextViewText(R.id.widget_hijri_date, widgetData.getString("hijri_date", "---"))
                 
+                // 🌟 ADDED: Extract and render dynamic Salawat + Shia Event text block
+                val defaultSalawat = "اللَّهُمَّ صَلِّ عَلَى مُحَمَّدٍ وَآلِ مُحَمَّدٍ وَعَجِّلْ فَرَجَهُمْ"
+                views.setTextViewText(R.id.widget_salawat_text, widgetData.getString("salawat_display_text", defaultSalawat))
+                
                 // Render the prayer time strings
                 views.setTextViewText(R.id.widget_fajr_time, widgetData.getString("time_fajr", "--:--"))
                 views.setTextViewText(R.id.widget_dhuhr_time, widgetData.getString("time_dhuhr", "--:--"))
