@@ -171,11 +171,11 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> with Widg
   }
 
   Future<void> _loadAndCalculateTimes() async {
-    final coordinates = await LocationService.getSavedOrLiveLocation();
-    final double targetLat = coordinates['latitude']!;
-    final double targetLng = coordinates['longitude']!;
-
-    final String resolvedCity = await LocationService.getCityName(targetLat, targetLng);
+    final Map<String, dynamic> coordinates = await LocationService.getSavedOrLiveLocation();
+    final double targetLat = coordinates['latitude'] as double;
+    final double targetLng = coordinates['longitude'] as double;
+    final String locationStatus = coordinates['status'] as String;
+    final String resolvedCity = await LocationService.getCityName(targetLat, targetLng, locationStatus);
     final today = DateTime.now();
 
     final Map<String, DateTime> calculatedTimes = Map<String, DateTime>.from(
@@ -616,7 +616,7 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> with Widg
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'Version 2.0.5', // 🌟 FIXED: Bumped version tag to 2.0.5
+                                'Version 2.0.6', // 🌟 FIXED: Bumped version tag to 2.0.6
                                 textAlign: TextAlign.center,
                                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.tealAccent.withOpacity(0.5), letterSpacing: 1.0),
                               ),
@@ -980,7 +980,7 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> with WidgetsBindingObserver {
   String _selectedVoice = "zadeh";
   int _hijriOffset = 0;
   bool _isTestingAudio = false;
@@ -989,6 +989,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _selectedCityKey = "karachi";
 
   int _testDelaySeconds = 30; 
+  // 🌟 State tracking for device hardware location authorizations
+  bool _isLocationPermissionGranted = true;
 
   final Map<String, String> _voiceLabels = {
     'zadeh': 'Moazenzadeh Ardabili',
@@ -1063,9 +1065,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
+	WidgetsBinding.instance.addObserver(this);
     _loadSettings();
+	_evaluateDevicePermissions(); // Trigger verification loop on startup
   }
-
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+	super.dispose();
+  }
+  
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+	   _evaluateDevicePermissions();
+	}   
+  }
   Future<void> _loadSettings() async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     setState(() {
@@ -1077,7 +1092,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _selectedCityKey = _presetCities.containsKey(savedCity) ? savedCity : 'karachi';
     });
   }
-
+  /// Queries hardware channels to confirm system level clearance status
+  Future<void> _evaluateDevicePermissions() async {
+    final bool status = await LocationService.isPermissionGranted();
+    if (mounted) {
+      setState(() {
+        _isLocationPermissionGranted = status;
+      });
+    }
+  }
   Future<void> _updateVoicePreference(String? newVoice) async {
     if (newVoice == null) return;
     if (_isTestingAudio) await _toggleAzanTest();
@@ -1191,7 +1214,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
       }
     }
   }
-
+  
+  // 🌟 Permanent notices helper layout view generator 
+  Widget _buildPermanentPermissionWarningBar() {
+    return Card(
+      margin: EdgeInsets.zero,
+      color: Colors.red.shade900.withOpacity(0.85),
+      shape: RoundedRectangleBorder(
+        side: const BorderSide(color: Colors.redAccent, width: 1.0),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 10.0),
+        child: Row(
+          children: [
+            const Icon(Icons.location_off, color: Colors.white, size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'صلاحية الموقع معطلة',
+                    textDirection: TextDirection.rtl,
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                  ),
+                  Text(
+                    _useManualLocation 
+                      ? 'Location permissions are denied. The widget background sync requires manual configuration adjustments.'
+                      : 'Location permissions are denied. Live tracking calculations will fail until enabled.',
+                    style: const TextStyle(fontSize: 11, color: Colors.white70, height: 1.3),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            TextButton(
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.white12,
+                foregroundColor: Colors.white,
+                side: const BorderSide(color: Colors.white30, width: 0.5),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              ),
+              onPressed: () async {
+                await LocationService.openAppSettingsMenu();
+                // Re-evaluate automatically when the user switches back into the app thread
+                await Future.delayed(const Duration(milliseconds: 800));
+                _evaluateDevicePermissions();
+              },
+              child: const Text('Fix Now', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
   @override
   Widget build(BuildContext context) {
     final String currentReciterLabel = _voiceLabels[_selectedVoice] ?? "Moazenzadeh Ardabili";
@@ -1211,6 +1288,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: ListView(
           padding: const EdgeInsets.all(16.0),
           children: [
+		    // 🌟 Inject the permanent warning bar if permission checks return false
+            if (!_isLocationPermissionGranted) ...[
+              _buildPermanentPermissionWarningBar(),
+              const SizedBox(height: 12),
+            ],
+			
             Card(
               color: Colors.black.withOpacity(0.3),
               shape: RoundedRectangleBorder(side: const BorderSide(color: Colors.redAccent, width: 0.5), borderRadius: BorderRadius.circular(10)),
