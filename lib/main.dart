@@ -14,9 +14,19 @@ import 'alarm_manager_service.dart';
 import 'hijri_calendar_helper.dart';
 import 'widget_service.dart';
 import 'audio_state_manager.dart'; // Centralized static audio manager cockpit
+// 🌟 Import your new update manager file here
+import 'app_update_manager.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 🌟 Step 2: Intercept boot sequence to handle version migrations immediately
+  try {
+    print(">>> Checking app version and executing necessary migrations...");
+    await AppUpdateManager.handleAppUpdateMigration();
+  } catch (migrationError) {
+    print("!!! Critical warning: Migration engine failed to run: $migrationError");
+  }
   await AlarmManagerService.initializeEngine();
   await AlarmManagerService.primeAudioCache();
   runApp(const HayyaAlaKhairilAmalApp());
@@ -616,7 +626,7 @@ class _PrayerDashboardScreenState extends State<PrayerDashboardScreen> with Widg
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                'Version 2.0.6', // 🌟 FIXED: Bumped version tag to 2.0.6
+                                'Version 2.0.7', // 🌟 FIXED: Bumped version tag to 2.0.6
                                 textAlign: TextAlign.center,
                                 style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.tealAccent.withOpacity(0.5), letterSpacing: 1.0),
                               ),

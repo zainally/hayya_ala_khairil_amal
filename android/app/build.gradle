@@ -1,6 +1,5 @@
 plugins {
     id "com.android.application"
-    id "org.jetbrains.kotlin.android"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
 }
@@ -15,12 +14,12 @@ if (localPropertiesFile.exists()) {
 
 def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
 if (flutterVersionCode == null) {
-    flutterVersionCode = '206'
+    flutterVersionCode = '207'
 }
 
 def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) {
-    flutterVersionName = '2.0.6'
+    flutterVersionName = '2.0.7'
 }
 
 android {
@@ -34,8 +33,9 @@ android {
         coreLibraryDesugaringEnabled true
     }
 
+    // Add this back to explicitly lock the Kotlin target to match Java 17
     kotlinOptions {
-        jvmTarget = "17"
+        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
